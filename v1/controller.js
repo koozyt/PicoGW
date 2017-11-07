@@ -14,23 +14,14 @@ var admin ;
 var globals ;
 var Plugins = {} ;
 
-exports.init = function(_globals /*,clientFactory*/){
-	globals = _globals ;
-	return new Promise( function(ac,rj){
-        loadPlugins().then(plugin_paths => {
-            log('Plugins registeration started.') ;
-            // Admin plugin should be initialized first
-            registerplugin(plugin_paths, 'admin').then(() => {
-                ac('All plugins initialization process is ended.');
-            });
-        });
-	}) ;
-} ;
-
-async function loadPlugins() {
+exports.init = async function(_globals /*,clientFactory*/){
+	globals = _globals;
     const legacyPluginPaths = await searchLegacyPlugins();
     const npmPluginPaths = await searchNpmPlugins();
-    return Object.assign(legacyPluginPaths, npmPluginPaths);
+    const pluginPaths = Object.assign(npmPluginPaths, legacyPluginPaths);
+    log('Plugins registeration started.');
+    // Admin plugin should be initialized first
+    return registerplugin(pluginPaths, 'admin');
 }
 
 function searchLegacyPlugins() {
@@ -87,7 +78,8 @@ function searchNpmPlugins() {
             files = files.filter((name) => {
                 return name.startsWith('picogw-plugin-');
             }).forEach((name) => {
-                paths[name] = path.join(rootpath, 'node_modules', name);
+                const shortName = name.split('picogw-plugin-')[1];
+                paths[shortName] = path.join(rootpath, 'node_modules', name);
             });
             resolve(paths);
         });
@@ -113,29 +105,26 @@ async function registerplugin(plugin_paths, plugin_name){
 	exportmethods.localStorage = pc.localStorage ;
 	exportmethods.localSettings = pc.localSettings ;
 
-	try {
-		var pobj = require(path.join('..', plugin_path)) ;
-		// Plugin init must return procedure call callback function.
-        const initPlugin = async function (pobj) {
-	        return pobj.init(exportmethods);
-        }
-        return initPlugin(pobj, exportmethods).then( p => {
-			pc.procCallback = p ;
-			Plugins[plugin_name] = pc ;
-			if( plugin_name === 'admin' )	admin = pobj ;
-			log(plugin_name+' plugin initiaized') ;
-		}).catch(e=>{
-			log(plugin_name+' plugin could not be initiaized') ;
-		}).then(() => {
-            const names = Object.keys(plugin_paths);
-            if( names.length == 0 ){return;}
-            return registerplugin(plugin_paths, names[0]) ;
-        });
-
-	} catch (e){
-        log('Error in initializing '+plugin_name+' plugin: '+JSON.stringify(e));
-        console.log(e);
+	var pobj = require(path.join('..', plugin_path)) ;
+    const initPlugin = async function (pobj) {
+	    return pobj.init(exportmethods);
     }
+    return initPlugin(pobj, exportmethods).then( p => {
+	    // Plugin init must return procedure call callback function.
+		pc.procCallback = p;
+		Plugins[plugin_name] = pc ;
+		if( plugin_name === 'admin' )	admin = pobj ;
+		log(plugin_name+' plugin initiaized') ;
+	}).catch(e=>{
+		log(plugin_name+' plugin could not be initiaized') ;
+        log(e);
+	}).then(() => {
+        const names = Object.keys(plugin_paths);
+        if( names.length == 0 ){
+            return 'All plugins initialization process is ended.';
+        }
+        return registerplugin(plugin_paths, names[0]) ;
+    });
 }
 
 
@@ -214,6 +203,7 @@ exports.callproc = function(params){
 			} else rj({error:'Procedure callback is not defined for the plugin '+pprefix}) ;
 		} catch(e){
 			rj({error:'Invalidly formatted procedure: ' + procedure});
+            log(e);
 		} ;
 	}) ;
 } ;
