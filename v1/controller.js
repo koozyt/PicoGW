@@ -4,6 +4,7 @@ const VERSION = 'v1';
 const CALL_TIMEOUT = 60*1000 ;
 
 var fs = require('fs');
+var path = require('path');
 
 var PluginInterface = require('./PluginInterface.js').PluginInterface ;
 
@@ -12,71 +13,131 @@ var admin ;
 
 var globals ;
 var Plugins = {} ;
+
 exports.init = function(_globals /*,clientFactory*/){
 	globals = _globals ;
 	return new Promise( function(ac,rj){
-		// Scan plugins
-		const PLUGINS_FOLDER = './'+VERSION+'/plugins/' ;
-		try {
-			fs.statSync( PLUGINS_FOLDER ) ;
-			fs.readdir( PLUGINS_FOLDER, (err, files) => {
-				if (err){ rj('No plugin folder found.'); return; }
-
-				// Admin plugin should be initialized first.
-				var plugin_names = ['admin'] ;
-
-				files.filter(dirname => {
-					var fo = fs.lstatSync(PLUGINS_FOLDER + dirname) ;
-					return fo.isDirectory() || fo.isSymbolicLink();
-				}).forEach(dirname => {
-					if( dirname == 'admin') return ;
-					plugin_names.push(dirname) ;
-		   	 	}) ;
-		   	 	log('Plugins registeration started.') ;
-		   	 	function registerplugin(){
-		   	 		var plugin_name = plugin_names.shift() ;
-					var pc = new PluginInterface(
-						{VERSION:VERSION,admin:admin,PubSub:globals.PubSub}
-						,plugin_name) ;
-					var exportmethods = {} ;
-					[ 'publish','log','on','off','getNetIDFromIPv4Address','setNetIDCallbacks'
-						,'getSettingsSchema','getSettings'
-						,'setOnGetSettingsSchemaCallback','setOnGetSettingsCallback','setOnSettingsUpdatedCallback'
-						,'getpath','getprefix']
-						.forEach(methodname => {
-						exportmethods[methodname] = function(){
-							return pc[methodname].apply(pc,arguments);
-						} ;
-					}) ;
-					exportmethods.localStorage = pc.localStorage ;
-					exportmethods.localSettings = pc.localSettings ;
-
-					try {
-						var pobj = require('./plugins/' + plugin_name + '/index.js') ;
-						// Plugin init must return procedure call callback function.
-						Promise.all([pobj.init(exportmethods)]).then( p => {
-							pc.procCallback = p[0] ;
-
-							Plugins[plugin_name] = pc ;
-							if( plugin_name === 'admin' )	admin = pobj ;
-							log(plugin_name+' plugin initiaized') ;
-				   	 		if( plugin_names.length == 0 ){ac('All plugins initialization process is ended.'); return;}
-				   	 		registerplugin() ;
-						}).catch(e=>{
-							log(plugin_name+' plugin could not be initiaized') ;
-				   	 		if( plugin_names.length == 0 ){ac('All plugins initialization process is ended.'); return;}
-				   	 		registerplugin() ;
-						}) ;
-
-					} catch (e){log('Error in initializing '+plugin_name+' plugin: '+JSON.stringify(e)) ;}
-				}
-	   	 		registerplugin() ;
-			}) ;
-		} catch(e){
-			rj('No plugins exists.') ;
-		}
+        loadPlugins().then(plugin_paths => {
+            log('Plugins registeration started.') ;
+            // Admin plugin should be initialized first
+            registerplugin(plugin_paths, 'admin').then(() => {
+                ac('All plugins initialization process is ended.');
+            });
+        });
 	}) ;
 } ;
+
+async function loadPlugins() {
+    const legacyPluginPaths = await searchLegacyPlugins();
+    const npmPluginPaths = await searchNpmPlugins();
+    return Object.assign(legacyPluginPaths, npmPluginPaths);
+}
+
+function searchLegacyPlugins() {
+    return new Promise((ac,rj) => {
+	    // Scan plugins
+	    const PLUGINS_FOLDER = path.join('./', VERSION, '/plugins/') ;
+	    try {
+		    fs.statSync( PLUGINS_FOLDER ) ;
+		    fs.readdir( PLUGINS_FOLDER, (err, files) => {
+			    if (err){ rj('No plugin folder found.'); return; }
+
+			    var plugin_paths = {} ;
+			    files.filter(dirname => {
+				    var fo = fs.lstatSync(PLUGINS_FOLDER + dirname) ;
+				    return fo.isDirectory() || fo.isSymbolicLink();
+			    }).forEach(dirname => {
+				    plugin_paths[dirname] = path.join(PLUGINS_FOLDER, dirname, 'index.js');
+		   	    }) ;
+                ac(plugin_paths);
+		    }) ;
+	    } catch(e){
+		    rj('No plugins exists.') ;
+	    }
+    });
+}
+
+function searchNpmPlugins() {
+    return new Promise((resolve, reject) => {
+        // This list npm code is TOO slow, so comment this code and read node_modules direcotry directly...
+        //npm.load({}, (err) => {
+        //    if (err) {
+        //        console.error(err);
+        //        reject(err);
+        //        return;
+        //    }
+        //    npm.commands.ls([], true, (err, data, packages) => {
+        //        let npms = Object.keys(packages.dependencies);
+        //        npms = npms.filter((name) => {
+        //            return name.startsWith('picogw-plugin-');
+        //        });
+        //        resolve(npms);
+        //    });
+        //})
+
+        //const rootpath = path.dirname(path.dirname(__filename));
+        const rootpath = '.';
+        fs.readdir(path.join(rootpath, 'node_modules'), (err, files) => {
+            if (err) {
+                console.error(err);
+                reject(err);
+                return;
+            }
+            const paths = {};
+            files = files.filter((name) => {
+                return name.startsWith('picogw-plugin-');
+            }).forEach((name) => {
+                paths[name] = path.join(rootpath, 'node_modules', name);
+            });
+            resolve(paths);
+        });
+    });
+}
+
+async function registerplugin(plugin_paths, plugin_name){
+    const plugin_path = plugin_paths[plugin_name];
+    delete plugin_paths[plugin_name];
+	var pc = new PluginInterface(
+		{VERSION:VERSION,admin:admin,PubSub:globals.PubSub}
+		,plugin_name, plugin_path) ;
+	var exportmethods = {} ;
+	[ 'publish','log','on','off','getNetIDFromIPv4Address','setNetIDCallbacks'
+		,'getSettingsSchema','getSettings'
+		,'setOnGetSettingsSchemaCallback','setOnGetSettingsCallback','setOnSettingsUpdatedCallback'
+		,'getpath','getprefix']
+		.forEach(methodname => {
+		exportmethods[methodname] = function(){
+			return pc[methodname].apply(pc,arguments);
+		} ;
+	}) ;
+	exportmethods.localStorage = pc.localStorage ;
+	exportmethods.localSettings = pc.localSettings ;
+
+	try {
+		var pobj = require(path.join('..', plugin_path)) ;
+		// Plugin init must return procedure call callback function.
+        const initPlugin = async function (pobj) {
+	        return pobj.init(exportmethods);
+        }
+        return initPlugin(pobj, exportmethods).then( p => {
+			pc.procCallback = p ;
+			Plugins[plugin_name] = pc ;
+			if( plugin_name === 'admin' )	admin = pobj ;
+			log(plugin_name+' plugin initiaized') ;
+		}).catch(e=>{
+			log(plugin_name+' plugin could not be initiaized') ;
+		}).then(() => {
+            const names = Object.keys(plugin_paths);
+            if( names.length == 0 ){return;}
+            return registerplugin(plugin_paths, names[0]) ;
+        });
+
+	} catch (e){
+        log('Error in initializing '+plugin_name+' plugin: '+JSON.stringify(e));
+        console.log(e);
+    }
+}
+
 
 exports.callproc = function(params){
 	var method = params.method ;

@@ -2,13 +2,15 @@
 "use strict";
 
 var fs = require('fs');
+var path = require('path');
 let SingleFileLocalStorage = require('../MyLocalStorage.js').SingleFileLocalStorage ;
 
 var globals = {} ;	// VERSION, admin, PubSub
 exports.PluginInterface = class {
-	constructor ( _globals,prefix ) {
+	constructor ( _globals, prefix, pluginPath ) {
 		globals = _globals ;
 	    this.prefix = prefix ;
+        this.pluginPath = pluginPath;
 	    this.log = (msg) => { console.log(`${this.prefix} plugin> ${msg}`); };
 
 	    this.localStorage = new SingleFileLocalStorage(this.getpath()+'localstorage.json') ;
@@ -68,7 +70,6 @@ exports.PluginInterface = class {
 	on(handlerName,handler_body){ this['on'+handlerName] = handler_body ; }
 	off(handlerName){ delete this['on'+handlerName] ; this['on'+handlerName] = undefined ;}
 	// Get plugin home dir
-	getpath(){ return `${globals.VERSION}/plugins/${this.prefix}/` ; }
-
+	getpath(){ return path.join(this.pluginPath, '/'); }
 	getprefix (){ return this.prefix; }
 } ;
