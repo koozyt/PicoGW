@@ -13,7 +13,7 @@
     "inpath": "~1.0.2",
     "mime": "^1.3.4",
     "node-localstorage": "^1.3.0",
-    "node-red": "^0.17.5",
+    "node-red": "^5.0.8",
     "node-red-contrib-picogw": "file:local-npm/node-red-contrib-picogw",
     "opts": "^1.2.6",
     "pidof": "~1.0.2",
